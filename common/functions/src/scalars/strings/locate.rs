@@ -15,13 +15,20 @@
 use std::fmt;
 
 use common_datavalues::prelude::*;
-use common_datavalues::DataTypeAndNullable;
+use common_datavalues2::ColumnRef;
+use common_datavalues2::ColumnsWithField;
+use common_datavalues2::DataTypePtr;
+use common_datavalues2::StringType;
+use common_datavalues2::ToDataType;
+use common_datavalues2::UInt64Type;
+use common_datavalues2::wrap_nullable;
 use common_exception::Result;
 use itertools::izip;
 
-use crate::scalars::function_factory::FunctionDescription;
+use crate::scalars::Function2Description;
+use crate::scalars::cast_column_field;
 use crate::scalars::function_factory::FunctionFeatures;
-use crate::scalars::Function;
+use crate::scalars::Function2;
 
 const FUNC_LOCATE: u8 = 1;
 const FUNC_POSITION: u8 = 2;
@@ -37,13 +44,13 @@ pub struct LocatingFunction<const T: u8> {
 }
 
 impl<const T: u8> LocatingFunction<T> {
-    pub fn try_create(display_name: &str) -> Result<Box<dyn Function>> {
+    pub fn try_create(display_name: &str) -> Result<Box<dyn Function2>> {
         Ok(Box::new(LocatingFunction::<T> {
             display_name: display_name.to_string(),
         }))
     }
 
-    pub fn desc() -> FunctionDescription {
+    pub fn desc() -> Function2Description {
         let mut feature = FunctionFeatures::default().deterministic();
         feature = if T == FUNC_LOCATE {
             feature.variadic_arguments(2, 3)
@@ -51,38 +58,52 @@ impl<const T: u8> LocatingFunction<T> {
             feature.num_arguments(2)
         };
 
-        FunctionDescription::creator(Box::new(Self::try_create)).features(feature)
+        Function2Description::creator(Box::new(Self::try_create)).features(feature)
     }
 }
 
-impl<const T: u8> Function for LocatingFunction<T> {
+impl<const T: u8> Function2 for LocatingFunction<T> {
     fn name(&self) -> &str {
         &*self.display_name
     }
 
-    fn return_type(&self, args: &[DataTypeAndNullable]) -> Result<DataTypeAndNullable> {
-        let dt = DataType::UInt64;
-        let nullable = args.iter().any(|arg| arg.is_nullable());
-        Ok(DataTypeAndNullable::create(&dt, nullable))
+    fn return_type(&self, args: &[&DataTypePtr]) -> Result<DataTypePtr> {
+        // let dt = DataType::UInt64;
+        // let nullable = args.iter().any(|arg| arg.is_nullable());
+        // Ok(DataTypePtr::create(&dt, nullable))
+        
+        // According to elt.rs.
+        let dt = u64::to_data_type();
+        match args.iter().any(|arg| arg.is_nullable()) {
+            true => Ok(wrap_nullable(&dt)),
+            false => Ok(dt),
+        }
     }
 
-    fn eval(&self, columns: &DataColumnsWithField, input_rows: usize) -> Result<DataColumn> {
+    fn eval(&self, columns: &ColumnsWithField, input_rows: usize) -> Result<ColumnRef> {
         let (ss_column, s_column) = if T == FUNC_INSTR {
             (
-                columns[1].column().cast_with_type(&DataType::String)?,
-                columns[0].column().cast_with_type(&DataType::String)?,
+                // columns[1].column().cast_with_type(&DataType::String)?,
+                // columns[0].column().cast_with_type(&DataType::String)?,
+
+                // According to oct.rs.
+                cast_column_field(&columns[1], &StringType::arc())?,
+                cast_column_field(&columns[0], &StringType::arc())?,
             )
         } else {
             (
-                columns[0].column().cast_with_type(&DataType::String)?,
-                columns[1].column().cast_with_type(&DataType::String)?,
+                // columns[0].column().cast_with_type(&DataType::String)?,
+                // columns[1].column().cast_with_type(&DataType::String)?,
+                cast_column_field(&columns[0], &StringType::arc())?,
+                cast_column_field(&columns[1], &StringType::arc())?,
             )
         };
 
         let p_column = if T == FUNC_LOCATE && columns.len() == 3 {
-            columns[2].column().cast_with_type(&DataType::UInt64)?
+            // columns[2].column().cast_with_type(&DataType::UInt64)?
+            cast_column_field(&columns[2], &UInt64Type::arc())?
         } else {
-            DataColumn::Constant(DataValue::UInt64(Some(1)), input_rows)
+            // DataColumn::Constant(DataValue::UInt64(Some(1)), input_rows)
         };
 
         let r_column: DataColumn = match (ss_column, s_column, p_column) {
